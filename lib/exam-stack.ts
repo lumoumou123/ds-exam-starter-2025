@@ -13,6 +13,7 @@ import * as events from "aws-cdk-lib/aws-lambda-event-sources";
 import * as sns from "aws-cdk-lib/aws-sns";
 import * as sqs from "aws-cdk-lib/aws-sqs";
 import * as subs from "aws-cdk-lib/aws-sns-subscriptions";
+import * as logs from "aws-cdk-lib/aws-logs";
 
 export class ExamStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -101,48 +102,89 @@ export class ExamStack extends cdk.Stack {
     
     // Create Queue B (Dead Letter Queue)
     const queueB = new sqs.Queue(this, "QueueB", {
-      queueName: "QueueB",
       receiveMessageWaitTime: cdk.Duration.seconds(5),
+      visibilityTimeout: cdk.Duration.seconds(30),
     });
 
     // Create Queue A with DLQ configuration
     const queueA = new sqs.Queue(this, "QueueA", {
-      queueName: "QueueA",
       receiveMessageWaitTime: cdk.Duration.seconds(5),
+      visibilityTimeout: cdk.Duration.seconds(30),
       deadLetterQueue: {
         queue: queueB,
-        maxReceiveCount: 3,  // Messages will be moved to DLQ after 3 failed processing attempts
+        maxReceiveCount: 3,
       },
     });
 
-    // Subscribe Queue A to Topic 1
-    topic1.addSubscription(new subs.SqsSubscription(queueA));
+    // Subscribe Queue A to Topic 1 with filter policy - 使用字符串匹配而不是嵌套属性匹配
+    topic1.addSubscription(new subs.SqsSubscription(queueA, {
+      filterPolicy: {
+        'address.country': sns.SubscriptionFilter.stringFilter({
+          allowlist: ["Ireland", "China"],
+        }),
+      },
+      rawMessageDelivery: true,
+    }));
 
-    // Create Lambda X
+    // Create Lambda X with explicit log retention
     const lambdaXFn = new lambdanode.NodejsFunction(this, "LambdaXFn", {
       architecture: lambda.Architecture.ARM_64,
       runtime: lambda.Runtime.NODEJS_22_X,
       entry: `${__dirname}/../lambdas/lambdaX.ts`,
-      timeout: cdk.Duration.seconds(10),
-      memorySize: 128,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
       environment: {
         REGION: "eu-west-1",
+        TABLE_NAME: table.tableName,
+        LOG_LEVEL: "DEBUG",
       },
+      logRetention: logs.RetentionDays.ONE_WEEK,
+      tracing: lambda.Tracing.ACTIVE, // 启用 X-Ray 跟踪
     });
 
     // Add SQS event source to Lambda X
     lambdaXFn.addEventSource(new events.SqsEventSource(queueA, {
-      batchSize: 1,  // Process one message at a time
+      batchSize: 1,
       maxBatchingWindow: cdk.Duration.seconds(0),
+      reportBatchItemFailures: true, // 启用部分批处理失败报告
     }));
 
     // Grant necessary permissions
     queueA.grantConsumeMessages(lambdaXFn);
     queueB.grantSendMessages(lambdaXFn);
+    topic1.grantPublish(lambdaXFn);
+    
+    // Enable CloudWatch Logs access for Lambda function
+    new logs.LogGroup(this, 'LambdaXLogGroup', {
+      logGroupName: `/aws/lambda/${lambdaXFn.functionName}`,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      retention: logs.RetentionDays.ONE_WEEK,
+    });
 
-    // Remove unused Lambda Y
-    // const lambdaYFn = new lambdanode.NodejsFunction(this, "LambdaYFn", {...});
+    // Add stack outputs
+    new cdk.CfnOutput(this, 'TopicArn', {
+      value: topic1.topicArn,
+      description: 'The ARN of Topic1',
+      exportName: 'Topic1Arn',
+    });
 
+    new cdk.CfnOutput(this, 'QueueAUrl', {
+      value: queueA.queueUrl,
+      description: 'The URL of Queue A',
+      exportName: 'QueueAUrl',
+    });
+
+    new cdk.CfnOutput(this, 'QueueBUrl', {
+      value: queueB.queueUrl,
+      description: 'The URL of Queue B',
+      exportName: 'QueueBUrl',
+    });
+
+    new cdk.CfnOutput(this, 'LambdaXFnName', {
+      value: lambdaXFn.functionName,
+      description: 'The name of Lambda X function',
+      exportName: 'LambdaXFnName',
+    });
   }
 }
   

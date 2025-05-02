@@ -1,0 +1,9 @@
+{
+    "name": "Zhang Wei",
+    "address": {
+        "street": "123 Nanjing Road",
+        "city": "Shanghai",
+        "country": "China"
+    },
+    "email": "zhangwei@example.com"
+} 

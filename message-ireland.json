@@ -1,9 +1,9 @@
 {
     "name": "Diarmuid O Connor",
-    "address" : {
+    "address": {
         "street": "1 Main Street",
         "city": "Capital City",
         "country": "Ireland"
- },
+    },
     "email": "doconnor@capital.ie"
-}
+} 
