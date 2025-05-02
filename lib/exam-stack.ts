@@ -95,24 +95,30 @@ export class ExamStack extends cdk.Stack {
     // ==================================
     // Question 2 - Event-Driven architecture
 
-     const bucket = new s3.Bucket(this, "exam-bucket", {
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-      autoDeleteObjects: true,
-      publicReadAccess: false,
-    });
-
     const topic1 = new sns.Topic(this, "Topic1", {
       displayName: "Exam topic",
     });
     
+    // Create Queue B (Dead Letter Queue)
     const queueB = new sqs.Queue(this, "QueueB", {
+      queueName: "QueueB",
       receiveMessageWaitTime: cdk.Duration.seconds(5),
     });
 
-    const queueA = new sqs.Queue(this, "queueA", {
+    // Create Queue A with DLQ configuration
+    const queueA = new sqs.Queue(this, "QueueA", {
+      queueName: "QueueA",
       receiveMessageWaitTime: cdk.Duration.seconds(5),
+      deadLetterQueue: {
+        queue: queueB,
+        maxReceiveCount: 3,  // Messages will be moved to DLQ after 3 failed processing attempts
+      },
     });
-    
+
+    // Subscribe Queue A to Topic 1
+    topic1.addSubscription(new subs.SqsSubscription(queueA));
+
+    // Create Lambda X
     const lambdaXFn = new lambdanode.NodejsFunction(this, "LambdaXFn", {
       architecture: lambda.Architecture.ARM_64,
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -124,17 +130,19 @@ export class ExamStack extends cdk.Stack {
       },
     });
 
-    const lambdaYFn = new lambdanode.NodejsFunction(this, "LambdaYFn", {
-      architecture: lambda.Architecture.ARM_64,
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: `${__dirname}/../lambdas/lambdaY.ts`,
-      timeout: cdk.Duration.seconds(10),
-      memorySize: 128,
-      environment: {
-        REGION: "eu-west-1",
-      },
-    });
-    
+    // Add SQS event source to Lambda X
+    lambdaXFn.addEventSource(new events.SqsEventSource(queueA, {
+      batchSize: 1,  // Process one message at a time
+      maxBatchingWindow: cdk.Duration.seconds(0),
+    }));
+
+    // Grant necessary permissions
+    queueA.grantConsumeMessages(lambdaXFn);
+    queueB.grantSendMessages(lambdaXFn);
+
+    // Remove unused Lambda Y
+    // const lambdaYFn = new lambdanode.NodejsFunction(this, "LambdaYFn", {...});
+
   }
 }
   
