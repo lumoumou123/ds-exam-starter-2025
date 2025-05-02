@@ -185,6 +185,38 @@ export class ExamStack extends cdk.Stack {
       description: 'The name of Lambda X function',
       exportName: 'LambdaXFnName',
     });
+
+    // Create Lambda Y
+    const lambdaYFn = new lambdanode.NodejsFunction(this, "LambdaYFn", {
+      architecture: lambda.Architecture.ARM_64,
+      runtime: lambda.Runtime.NODEJS_22_X,
+      entry: `${__dirname}/../lambdas/lambdaY.ts`,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      environment: {
+        REGION: "eu-west-1",
+      },
+      logRetention: logs.RetentionDays.ONE_WEEK,
+      tracing: lambda.Tracing.ACTIVE,
+    });
+
+    // Add SQS event source to Lambda Y from Queue A
+    lambdaYFn.addEventSource(new events.SqsEventSource(queueA, {
+      batchSize: 1,
+      maxBatchingWindow: cdk.Duration.seconds(0),
+      reportBatchItemFailures: true,
+    }));
+
+    // Grant necessary permissions
+    queueA.grantConsumeMessages(lambdaYFn);
+    queueB.grantSendMessages(lambdaYFn);
+
+    // Add Lambda Y name to stack outputs
+    new cdk.CfnOutput(this, 'LambdaYFnName', {
+      value: lambdaYFn.functionName,
+      description: 'The name of Lambda Y function',
+      exportName: 'LambdaYFnName',
+    });
   }
 }
   
