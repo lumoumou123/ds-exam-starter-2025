@@ -72,6 +72,25 @@ export class ExamStack extends cdk.Stack {
 
     const anEndpoint = api.root.addResource("patha");
 
+    // Add new endpoint for crew by role and movie
+    const crewEndpoint = api.root.addResource("crew");
+    const roleEndpoint = crewEndpoint.addResource("{role}");
+    const moviesEndpoint = roleEndpoint.addResource("movies");
+    const movieIdEndpoint = moviesEndpoint.addResource("{movieId}");
+
+    // Grant DynamoDB permissions to question1Fn
+    table.grantReadData(question1Fn);
+    
+    // Add environment variables
+    question1Fn.addEnvironment("TABLE_NAME", table.tableName);
+    question1Fn.addEnvironment("REGION", this.region);
+
+    // Add GET method with proper integration settings
+    movieIdEndpoint.addMethod("GET", new apig.LambdaIntegration(question1Fn, {
+      proxy: true,
+      allowTestInvoke: true,
+      timeout: cdk.Duration.seconds(10),
+    }));
 
     // ==================================
     // Question 2 - Event-Driven architecture
